@@ -1,0 +1,28 @@
+#!/bin/bash
+
+set -e
+
+# Enable sudo for current script execution
+
+# Update system and install essential packages
+
+sudo pacman -Syu --noconfirm
+sudo pacman -S --needed --noconfirm base-devel git curl wget unzip vim
+
+# Install yay AUR helper
+
+# Install bluetooth and enable bluetooth service
+
+# Install pipewire and enable pipewire services
+
+# Install networkmanager and enable its service
+
+# Install GPU drivers based on detected hardware
+
+# Install YAY Packages
+
+# Clone dotfiles repository and set up configurations
+
+# Create necessary directories and set permissions
+
+# Clean up and finish installation
