@@ -7,7 +7,7 @@ xdg-desktop-portal-hyprland  # Hyprland-specific integration for XDG portals
 xdg-desktop-portal-gtk       # GTK environment integration for XDG portals
 hypridle                     # manages idle behavior, screen locking, and suspend
 hyprshot                     # screenshot tool for Wayland
-hyprpaper                    # wallpaper manager
+swww                         # wallpaper manager
 rofi-wayland                 # launcher used to launch applications with a GUI
 hyprlock                     # screen locker
 mako                         # lightweight desktop notification daemon
