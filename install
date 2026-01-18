@@ -38,7 +38,7 @@ fi
 echo "[+] Installing base dependencies..."
 KERNEL_PKG=$(pacman -Q | grep -E '^linux(-lts|-zen)? ' | awk '{print $1}')
 sudo pacman -S --needed --noconfirm \
-    git base-devel curl wget unzip vim "${KERNEL_PKG}-headers" pciutils
+    git base-devel "${KERNEL_PKG}-headers" curl wget unzip vim pciutils brightnessctl
 echo "[✓] Base dependencies installation complete."
 
 ### === AUR HELPER INSTALLATION ===
@@ -107,7 +107,16 @@ echo "[✓] Services installation and enabling complete."
 
 ### === DOTFILES ===
 echo "[+] Installing dotfiles..."
-rsync -av dotfiles/ "$USER_HOME/.config/"
+rsync -av dotfiles/home/ "$USER_HOME/"
+for folder in dotfiles/config/*; do
+    app=$(basename "$folder")
+    rsync -av --ignore-existing "$folder/" "$USER_HOME/.config/$app/"
+done
+for folder in dotfiles/local/*; do
+    app=$(basename "$folder")
+    rsync -av --ignore-existing "$folder/" "$USER_HOME/.local/$app/"
+done
+echo "[✓] Dotfiles installation complete."
 
 ### === DIRECTORIES ===
 echo "[+] Creating user directories..."
@@ -121,4 +130,5 @@ rm -rf /tmp/yay
 rm -rf "$USER_HOME/.cache/"*
 echo "[✓] Cleanup completed"
 
+### === DONE ===
 echo "[✓] Installation complete! Please reboot your system."

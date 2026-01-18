@@ -1,0 +1,66 @@
+# -----------------------------
+# Wayland compositor and tools
+# -----------------------------
+hyprland                     # Wayland compositor (main graphical environment)
+xdg-desktop-portal           # portal support for sandboxed apps (Flatpak, etc.)
+xdg-desktop-portal-hyprland  # Hyprland-specific integration for XDG portals
+xdg-desktop-portal-gtk       # GTK environment integration for XDG portals
+hypridle                     # manages idle behavior, screen locking, and suspend
+hyprshot                     # screenshot tool for Wayland
+hyprpaper                    # wallpaper manager
+rofi-wayland                 # launcher used to launch applications with a GUI
+hyprlock                     # screen locker
+mako                         # lightweight desktop notification daemon
+wl-clipboard                 # clipboard utilities for Wayland (terminal copy/paste)
+cliphist                     # clipboard history manager (requires wl-clipboard)
+waybar                       # customizable status bar
+eww                          # customizable widgets and desktop panels
+
+# -----------------------------
+# Login/display manager
+# -----------------------------
+sddm                         # display manager (login screen)
+
+# -----------------------------
+# Fonts
+# -----------------------------
+ttf-jetbrains-mono-nerd      # Nerd Font with icons for terminal and widgets
+ttf-font-awesome             # icon fonts for apps and widgets
+noto-fonts                   # general-purpose font family
+noto-fonts-emoji             # emoji support for terminal and apps
+noto-fonts-cjk               # CJK character support (Chinese, Japanese, Korean)
+
+# -----------------------------
+# Terminal and utilities
+# -----------------------------
+kitty                        # GPU-accelerated terminal emulator
+fastfetch                    # system information tool similar to neofetch
+starship                     # customizable and advanced shell prompt
+fzf                          # fuzzy finder for the terminal
+lsd                          # modern ls replacement with colors and icons
+bat                          # enhanced cat with syntax highlighting and line numbers
+zoxide                       # smart and fast directory navigation
+ripgrep                      # fast text search in files
+
+# -----------------------------
+# File explorer
+# -----------------------------
+yazi                         # terminal-based file manager
+
+# -----------------------------
+# Multimedia
+# -----------------------------
+mpv                          # video and audio player
+playerctl                    # control media players from the terminal
+ffmpeg                       # Video and audio managing library
+
+# -----------------------------
+# Browser
+# -----------------------------
+zen-browser-bin              # minimalistic browser (Wayland compatible)
+
+# -----------------------------
+# Editors
+# -----------------------------
+neovim                       # modern text editor, an improved version of Vim
+neomutt                      # terminal-based email client
