@@ -78,6 +78,8 @@ if echo "$GPU_INFO" | grep -qi nvidia; then
     echo "options nvidia_drm modeset=1" | sudo tee /etc/modprobe.d/nvidia.conf >/dev/null
     sudo modprobe nvidia_drm || true
     echo "[✓] NVIDIA configuration complete."
+else
+    echo "[✓] No GPU detected."
 fi
 
 ### === PACKAGES ===
@@ -85,7 +87,7 @@ echo "[+] Installing packages..."
 PACKAGE_LIST="packages.txt"
 
 if [ -f "$PACKAGE_LIST" ]; then
-    grep -Ev '^\s*#|^\s*$' "$PACKAGE_LIST" | yay -S --needed --noconfirm -
+    grep -Ev '^\s*#|^\s*$' "$PACKAGE_LIST" | sed 's/#.*//' | xargs yay -S --needed --noconfirm
     echo "[✓] Package installation complete."
 else
     echo "[!] Package list file '$PACKAGE_LIST' not found!"
