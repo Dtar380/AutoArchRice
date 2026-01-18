@@ -2,46 +2,123 @@
 
 set -e
 
-# Enable sudo for current script execution
+### === LOG ===
+LOG_FILE="install-$(date +%Y%m%d_%H%M%S).log"
+exec > >(tee -i "$LOG_FILE")
+exec 2>&1
 
+### === CONFIG ===
+REPO_DIR="$(pwd)"
+USER_HOME="$HOME"
 
-# Update system and install essential packages
+### === SUDO ===
+echo "[+] Requesting sudo permissions..."
+sudo -v
 
+while true; do
+    sudo -n true
+    sleep 60
+    kill -0 "$$" || exit
+done 2>/dev/null &
+
+### === INSTALLATION STEPS ===
+echo "[+] Updating system..."
 sudo pacman -Syu --noconfirm
-sudo pacman -S --needed --noconfirm base-devel git curl wget unzip vim
+echo "[✓] System update complete."
 
-# Install yay AUR helper if not already installed
-if ! command -v yay &> /dev/null; then
+if ! grep -q "^\[multilib\]" /etc/pacman.conf; then
+    echo "[+] Enabling multilib repository..."
+    sudo sed -i '/\[multilib\]/,/Include/s/^#//' /etc/pacman.conf
+    sudo pacman -Sy --noconfirm
+    echo "[✓] multilib enabled"
+else
+    echo "[✓] multilib already enabled"
+fi
+
+echo "[+] Installing base dependencies..."
+KERNEL_PKG=$(pacman -Q | grep -E '^linux(-lts|-zen)? ' | awk '{print $1}')
+sudo pacman -S --needed --noconfirm \
+    git base-devel curl wget unzip vim "${KERNEL_PKG}-headers" pciutils
+echo "[✓] Base dependencies installation complete."
+
+### === AUR HELPER INSTALLATION ===
+if ! command -v yay &>/dev/null; then
+    echo "[+] Installing YAY AUR helper..."
     git clone https://aur.archlinux.org/yay.git /tmp/yay
     cd /tmp/yay
     makepkg -si --noconfirm
-    cd -
-    rm -rf /tmp/yay
+    cd "$REPO_DIR"
+    echo "[✓] YAY installation complete."
+else
+    echo "[✓] YAY is already installed."
 fi
 
-# Install bluetooth and enable bluetooth service
-sudo pacman -S --needed --noconfirm bluez bluez-utils
-sudo systemctl enable --now bluetooth
+### === GPU DRIVERS ===
+echo "[+] Detecting GPU..."
+GPU_INFO=$(lspci | grep -E "VGA|3D")
 
-# Install pipewire and enable pipewire services
-sudo pacman -S --needed --noconfirm pipewire pipewire-pulse wireplumber pavucontrol
-systemctl --user enable --now pipewire pipewire-pulse wireplumber
+if echo "$GPU_INFO" | grep -qi intel; then
+    echo "[✓] Intel GPU detected"
+    sudo pacman -S --needed --noconfirm \
+    mesa intel-media-driver libva libva-intel-driver vulkan-intel
+fi
 
-# Install networkmanager and enable its service
-sudo pacman -S --needed --noconfirm networkmanager network-manager-applet
-sudo systemctl enable --now NetworkManager
+if echo "$GPU_INFO" | grep -qi amd; then
+    echo "[✓] AMD GPU detected"
+    sudo pacman -S --needed --noconfirm \
+    mesa xf86-video-amdgpu libva-mesa-driver vulkan-radeon
+fi
 
-# Install GPU drivers based on detected hardware
+if echo "$GPU_INFO" | grep -qi nvidia; then
+    echo "[✓] NVIDIA GPU detected"
+    sudo pacman -S --needed --noconfirm \
+    nvidia-open-dkms nvidia-utils lib32-nvidia-utils nvidia-settings egl-wayland
 
+    echo "[+] Configuring NVIDIA for Wayland..."
+    echo "options nvidia_drm modeset=1" | sudo tee /etc/modprobe.d/nvidia.conf >/dev/null
+    sudo modprobe nvidia_drm || true
+    echo "[✓] NVIDIA configuration complete."
+fi
 
-# Install YAY Packages from package list
+### === PACKAGES ===
+echo "[+] Installing packages..."
 PACKAGE_LIST="packages.txt"
 
+if [ -f "$PACKAGE_LIST" ]; then
+    grep -Ev '^\s*#|^\s*$' "$PACKAGE_LIST" | yay -S --needed --noconfirm -
+    echo "[✓] Package installation complete."
+else
+    echo "[!] Package list file '$PACKAGE_LIST' not found!"
+fi
 
-# Clone dotfiles repository and set up configurations
+### === SERVICES ===
+echo "[+] Installing service packages..."
+sudo pacman -S --needed --noconfirm \
+    NetworkManager network-manager-applet \
+    bluez bluez-utils \
+    pipewire pipewire-pulse wireplumber pavucontrol
+echo "[✓] Service packages installation complete."
 
+echo "[+] Enabling services..."
+sudo systemctl enable --now NetworkManager
+sudo systemctl enable --now bluetooth
+systemctl --user enable --now pipewire pipewire-pulse wireplumber
+echo "[✓] Services installation and enabling complete."
 
-# Create necessary directories and set permissions
+### === DOTFILES ===
+echo "[+] Installing dotfiles..."
+rsync -av dotfiles/ "$USER_HOME/.config/"
 
+### === DIRECTORIES ===
+echo "[+] Creating user directories..."
+mkdir -p "$USER_HOME/Documents" "$USER_HOME/Downloads" "$USER_HOME/Images" "$USER_HOME/Videos" "$USER_HOME/Music"
 
-# Clean up and finish installation
+### === FINALIZATION ===
+echo "[+] Cleaning up..."
+sudo pacman -Sc --noconfirm
+yay -Sc --noconfirm
+rm -rf /tmp/yay
+rm -rf "$USER_HOME/.cache/"*
+echo "[✓] Cleanup completed"
+
+echo "[✓] Installation complete! Please reboot your system."
