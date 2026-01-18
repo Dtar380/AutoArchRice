@@ -107,15 +107,26 @@ echo "[✓] Services installation and enabling complete."
 
 ### === DOTFILES ===
 echo "[+] Installing dotfiles..."
+
+# Create necessary directories
+mkdir -p "$USER_HOME/.config"
+mkdir -p "$USER_HOME/.local/bin" "$USER_HOME/.local/share"
+
+# Home files
 rsync -av dotfiles/home/ "$USER_HOME/"
+
+# Config files
 for folder in dotfiles/config/*; do
     app=$(basename "$folder")
     rsync -av --ignore-existing "$folder/" "$USER_HOME/.config/$app/"
 done
+
+# Local files
 for folder in dotfiles/local/*; do
     app=$(basename "$folder")
     rsync -av --ignore-existing "$folder/" "$USER_HOME/.local/$app/"
 done
+
 echo "[✓] Dotfiles installation complete."
 
 ### === DIRECTORIES ===
@@ -127,8 +138,7 @@ echo "[+] Cleaning up..."
 sudo pacman -Sc --noconfirm
 yay -Sc --noconfirm
 rm -rf /tmp/yay
-rm -rf "$USER_HOME/.cache/"*
+rm -rf "$USER_HOME/.cache/"{*,.*} 2>/dev/null || true
 echo "[✓] Cleanup completed"
 
-### === DONE ===
 echo "[✓] Installation complete! Please reboot your system."
