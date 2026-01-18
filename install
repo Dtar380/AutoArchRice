@@ -38,7 +38,7 @@ fi
 echo "[+] Installing base dependencies..."
 KERNEL_PKG=$(pacman -Q | grep -E '^linux(-lts|-zen)? ' | awk '{print $1}')
 sudo pacman -S --needed --noconfirm \
-    git base-devel "${KERNEL_PKG}-headers" curl wget unzip vim pciutils brightnessctl
+    git base-devel "${KERNEL_PKG}-headers" curl wget unzip vim pciutils brightnessctl rsync
 echo "[✓] Base dependencies installation complete."
 
 ### === AUR HELPER INSTALLATION ===
