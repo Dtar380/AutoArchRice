@@ -115,19 +115,37 @@ mkdir -p "$USER_HOME/.config"
 mkdir -p "$USER_HOME/.local/bin" "$USER_HOME/.local/share"
 
 # Home files
-rsync -av dotfiles/home/ "$USER_HOME/"
+if [ -d "dotfiles/home" ]; then
+    echo "[+] Syncing home directory files..."
+    rsync -av dotfiles/home/ "$USER_HOME/"
+    echo "[✓] Home files sync complete."
+else
+    echo "[!] 'dotfiles/home' directory not found, skipping home files sync."
+fi
 
 # Config files
-for folder in dotfiles/config/*; do
-    app=$(basename "$folder")
-    rsync -av --ignore-existing "$folder/" "$USER_HOME/.config/$app/"
-done
+if [ -d "dotfiles/config" ]; then
+    echo "[+] Syncing config directory files..."
+    for folder in dotfiles/config/*; do
+        app=$(basename "$folder")
+        rsync -av --ignore-existing "$folder/" "$USER_HOME/.config/$app/"
+    done
+    echo "[✓] Config files sync complete."
+else
+    echo "[!] 'dotfiles/config' directory not found, skipping config files sync."
+fi
 
 # Local files
-for folder in dotfiles/local/*; do
-    app=$(basename "$folder")
-    rsync -av --ignore-existing "$folder/" "$USER_HOME/.local/$app/"
-done
+if [ -d "dotfiles/local" ]; then
+    echo "[+] Syncing local directory files..."
+    for folder in dotfiles/local/*; do
+        app=$(basename "$folder")
+        rsync -av --ignore-existing "$folder/" "$USER_HOME/.local/$app/"
+    done
+    echo "[✓] Local files sync complete."
+else
+    echo "[!] 'dotfiles/local' directory not found, skipping local files sync."
+fi
 
 echo "[✓] Dotfiles installation complete."
 
