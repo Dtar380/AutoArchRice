@@ -96,7 +96,7 @@ fi
 ### === SERVICES ===
 echo "[+] Installing service packages..."
 sudo pacman -S --needed --noconfirm \
-    NetworkManager network-manager-applet \
+    networkmanager network-manager-applet \
     bluez bluez-utils \
     pipewire pipewire-pulse wireplumber pavucontrol
 echo "[✓] Service packages installation complete."
