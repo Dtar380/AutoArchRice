@@ -153,6 +153,19 @@ echo "[✓] Dotfiles installation complete."
 echo "[+] Creating user directories..."
 mkdir -p "$USER_HOME/Documents" "$USER_HOME/Downloads" "$USER_HOME/Images" "$USER_HOME/Videos" "$USER_HOME/Music"
 
+### === HYPRLAND KEYBOARD ===
+echo "[+] Setting up Hyprland keyboard configuration..."
+CURRENT_LAYOUT=$(localectl status | grep "X11 Layout" | awk '{print $3}')
+HYPR_CONFIG="$USER_HOME/.config/hypr/hyprland.conf"
+
+if [ -f "$HYPR_CONFIG" ]; then
+    sed -i "/^keyboard_layout/d" "$HYPR_CONFIG"
+    echo "keyboard_layout = $CURRENT_LAYOUT" >> "$HYPR_CONFIG"
+    echo "[✓] Hyprland keyboard layout set to '$CURRENT_LAYOUT'."
+else
+    echo "[!] Hyprland configuration file not found at '$HYPR_CONFIG'. Skipping keyboard setup."
+fi
+
 ### === FINALIZATION ===
 echo "[+] Cleaning up..."
 sudo pacman -Sc --noconfirm
