@@ -104,7 +104,7 @@ echo "[✓] Service packages installation complete."
 echo "[+] Enabling services..."
 sudo systemctl enable --now NetworkManager
 sudo systemctl enable --now bluetooth
-systemctl --user enable --now pipewire pipewire-pulse wireplumber
+sudo -u "$USER" systemctl --user enable --now pipewire pipewire-pulse wireplumber
 echo "[✓] Services installation and enabling complete."
 
 ### === DOTFILES ===
@@ -142,5 +142,15 @@ yay -Sc --noconfirm
 rm -rf /tmp/yay
 rm -rf "$USER_HOME/.cache/"{*,.*} 2>/dev/null || true
 echo "[✓] Cleanup completed"
+
+### === DONE ===
+which sddm &>/dev/null
+if command -v sddm &>/dev/null; then
+    echo "[+] Enabling SDDM display manager..."
+    sudo systemctl enable sddm
+    echo "[✓] SDDM enabled."
+else
+    echo "[!] SDDM not installed, skipping enabling."
+fi
 
 echo "[✓] Installation complete! Please reboot your system."
