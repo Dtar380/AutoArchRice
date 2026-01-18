@@ -55,7 +55,7 @@ fi
 
 ### === GPU DRIVERS ===
 echo "[+] Detecting GPU..."
-GPU_INFO=$(sudo lspci | grep -E "VGA|3D")
+GPU_INFO=$(sudo lspci | grep -E "VGA|3D" || true)
 
 if echo "$GPU_INFO" | grep -qi intel; then
     echo "[✓] Intel GPU detected"
