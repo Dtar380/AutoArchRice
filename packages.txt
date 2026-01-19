@@ -6,11 +6,11 @@ xdg-desktop-portal           # portal support for sandboxed apps (Flatpak, etc.)
 xdg-desktop-portal-hyprland  # Hyprland-specific integration for XDG portals
 xdg-desktop-portal-gtk       # GTK environment integration for XDG portals
 hypridle                     # manages idle behavior, screen locking, and suspend
-hyprshot                     # screenshot tool for Wayland
-swww                         # wallpaper manager
-rofi-wayland                 # launcher used to launch applications with a GUI
 hyprlock                     # screen locker
-mako                         # lightweight desktop notification daemon
+hyprshot                     # screenshot tool for Wayland
+swww                         # wallpaper engine
+rofi-wayland                 # launcher used to launch applications with a GUI
+mako                         # A lightweight notification daemon
 wl-clipboard                 # clipboard utilities for Wayland (terminal copy/paste)
 cliphist                     # clipboard history manager (requires wl-clipboard)
 waybar                       # customizable status bar

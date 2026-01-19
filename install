@@ -93,6 +93,13 @@ else
     echo "[!] Package list file '$PACKAGE_LIST' not found!"
 fi
 
+### === ZSH INSTALLATION ===
+echo "[+] Installing Zsh and setting it as default shell..."
+sudo pacman -S --needed --noconfirm zsh
+chsh_path=$(which zsh)
+chsh -s "$chsh_path" "$USER"_HOME
+echo "[✓] Zsh installation and default shell change complete."
+
 ### === SERVICES ===
 echo "[+] Installing service packages..."
 sudo pacman -S --needed --noconfirm \
