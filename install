@@ -12,22 +12,22 @@ REPO_DIR="$(pwd)"
 USER_HOME="$HOME"
 
 ### === SUDO ===
-echo "[+] Requesting sudo permissions..."
+echo "\n[+] Requesting sudo permissions..."
 sudo -v
 
 while true; do
-    sudo -n true
+    sudo -v
     sleep 60
     kill -0 "$$" || exit
 done 2>/dev/null &
 
 ### === INSTALLATION STEPS ===
-echo "[+] Updating system..."
+echo "\n[+] Updating system..."
 sudo pacman -Syu --noconfirm
 echo "[✓] System update complete."
 
 if ! grep -q "^\[multilib\]" /etc/pacman.conf; then
-    echo "[+] Enabling multilib repository..."
+    echo "\n[+] Enabling multilib repository..."
     sudo sed -i '/\[multilib\]/,/Include/s/^#//' /etc/pacman.conf
     sudo pacman -Sy --noconfirm
     echo "[✓] multilib enabled"
@@ -35,7 +35,7 @@ else
     echo "[✓] multilib already enabled"
 fi
 
-echo "[+] Installing base dependencies..."
+echo "\n[+] Installing base dependencies..."
 KERNEL_PKG=$(pacman -Q | grep -E '^linux(-lts|-zen)? ' | awk '{print $1}')
 sudo pacman -S --needed --noconfirm \
     git base-devel "${KERNEL_PKG}-headers" curl wget unzip vim \
@@ -44,7 +44,7 @@ echo "[✓] Base dependencies installation complete."
 
 ### === AUR HELPER INSTALLATION ===
 if ! command -v yay &>/dev/null; then
-    echo "[+] Installing YAY AUR helper..."
+    echo "\n[+] Installing YAY AUR helper..."
     git clone https://aur.archlinux.org/yay.git /tmp/yay
     cd /tmp/yay
     makepkg -si --noconfirm
@@ -55,7 +55,7 @@ else
 fi
 
 ### === GPU DRIVERS ===
-echo "[+] Detecting GPU..."
+echo "\n[+] Detecting GPU..."
 GPU_INFO=$(sudo lspci | grep -E "VGA|3D" || true)
 
 if echo "$GPU_INFO" | grep -qi intel; then
@@ -75,7 +75,7 @@ if echo "$GPU_INFO" | grep -qi nvidia; then
     sudo pacman -S --needed --noconfirm \
     nvidia-open-dkms nvidia-utils lib32-nvidia-utils nvidia-settings egl-wayland
 
-    echo "[+] Configuring NVIDIA for Wayland..."
+    echo "\n[+] Configuring NVIDIA for Wayland..."
     echo "options nvidia_drm modeset=1" | sudo tee /etc/modprobe.d/nvidia.conf >/dev/null
     sudo modprobe nvidia_drm || true
     echo "[✓] NVIDIA configuration complete."
@@ -84,7 +84,7 @@ else
 fi
 
 ### === PACKAGES ===
-echo "[+] Installing packages..."
+echo "\n[+] Installing packages..."
 PACKAGE_LIST="packages.txt"
 
 if [ -f "$PACKAGE_LIST" ]; then
@@ -95,28 +95,28 @@ else
 fi
 
 ### === ZSH INSTALLATION ===
-echo "[+] Installing Zsh and setting it as default shell..."
+echo "\n[+] Installing Zsh and setting it as default shell..."
 sudo pacman -S --needed --noconfirm zsh
 chsh_path=$(which zsh)
 chsh -s "$chsh_path" "$USER"
 echo "[✓] Zsh installation and default shell change complete."
 
 ### === SERVICES ===
-echo "[+] Installing service packages..."
+echo "\n[+] Installing service packages..."
 sudo pacman -S --needed --noconfirm \
     networkmanager network-manager-applet \
     bluez bluez-utils \
     pipewire pipewire-pulse wireplumber pavucontrol
 echo "[✓] Service packages installation complete."
 
-echo "[+] Enabling services..."
+echo "\n[+] Enabling services..."
 sudo systemctl enable --now NetworkManager
 sudo systemctl enable --now bluetooth
 systemctl --user enable --now pipewire pipewire-pulse wireplumber
 echo "[✓] Services installation and enabling complete."
 
 ### === DOTFILES ===
-echo "[+] Installing dotfiles..."
+echo "\n[+] Installing dotfiles..."
 
 # Create necessary directories
 mkdir -p "$USER_HOME/.config"
@@ -124,7 +124,7 @@ mkdir -p "$USER_HOME/.local/bin" "$USER_HOME/.local/share"
 
 # Home files
 if [ -d "dotfiles/home" ]; then
-    echo "[+] Syncing home directory files..."
+    echo "\n[+] Syncing home directory files..."
     rsync -av dotfiles/home/ "$USER_HOME/"
     echo "[✓] Home files sync complete."
 else
@@ -133,7 +133,7 @@ fi
 
 # Config files
 if [ -d "dotfiles/config" ]; then
-    echo "[+] Syncing config directory files..."
+    echo "\n[+] Syncing config directory files..."
     for folder in dotfiles/config/*; do
         app=$(basename "$folder")
         rsync -av --ignore-existing "$folder/" "$USER_HOME/.config/$app/"
@@ -145,7 +145,7 @@ fi
 
 # Local files
 if [ -d "dotfiles/local" ]; then
-    echo "[+] Syncing local directory files..."
+    echo "\n[+] Syncing local directory files..."
     for folder in dotfiles/local/*; do
         app=$(basename "$folder")
         rsync -av --ignore-existing "$folder/" "$USER_HOME/.local/$app/"
@@ -158,11 +158,11 @@ fi
 echo "[✓] Dotfiles installation complete."
 
 ### === DIRECTORIES ===
-echo "[+] Creating user directories..."
+echo "\n[+] Creating user directories..."
 mkdir -p "$USER_HOME/Documents" "$USER_HOME/Downloads" "$USER_HOME/Images" "$USER_HOME/Videos" "$USER_HOME/Music"
 
 ### === HYPRLAND KEYBOARD ===
-echo "[+] Setting up Hyprland keyboard configuration..."
+echo "\n[+] Setting up Hyprland keyboard configuration..."
 CURRENT_LAYOUT=$(localectl status | grep "X11 Layout" | awk -F: '{print $2}' | xargs)
 CURRENT_LAYOUT=${CURRENT_LAYOUT:-"us"}
 HYPR_CONFIG="$USER_HOME/.config/hypr/hyprland.conf"
@@ -184,7 +184,7 @@ else
 fi
 
 ### === FINALIZATION ===
-echo "[+] Cleaning up..."
+echo "\n[+] Cleaning up..."
 sudo pacman -Sc --noconfirm
 yay -Sc --noconfirm
 rm -rf /tmp/yay
@@ -194,7 +194,7 @@ echo "[✓] Cleanup completed"
 ### === DONE ===
 which sddm &>/dev/null
 if command -v sddm &>/dev/null; then
-    echo "[+] Enabling SDDM display manager..."
+    echo "\n[+] Enabling SDDM display manager..."
     sudo systemctl enable sddm
     echo "[✓] SDDM enabled."
 else
