@@ -38,7 +38,8 @@ fi
 echo "[+] Installing base dependencies..."
 KERNEL_PKG=$(pacman -Q | grep -E '^linux(-lts|-zen)? ' | awk '{print $1}')
 sudo pacman -S --needed --noconfirm \
-    git base-devel "${KERNEL_PKG}-headers" curl wget unzip vim pciutils brightnessctl rsync
+    git base-devel "${KERNEL_PKG}-headers" curl wget unzip vim \
+    pciutils brightnessctl rsync lua python jq
 echo "[✓] Base dependencies installation complete."
 
 ### === AUR HELPER INSTALLATION ===
@@ -97,7 +98,7 @@ fi
 echo "[+] Installing Zsh and setting it as default shell..."
 sudo pacman -S --needed --noconfirm zsh
 chsh_path=$(which zsh)
-chsh -s "$chsh_path" "$USER"_HOME
+chsh -s "$chsh_path" "$USER"
 echo "[✓] Zsh installation and default shell change complete."
 
 ### === SERVICES ===
@@ -162,12 +163,21 @@ mkdir -p "$USER_HOME/Documents" "$USER_HOME/Downloads" "$USER_HOME/Images" "$USE
 
 ### === HYPRLAND KEYBOARD ===
 echo "[+] Setting up Hyprland keyboard configuration..."
-CURRENT_LAYOUT=$(localectl status | grep "X11 Layout" | awk '{print $3}')
+CURRENT_LAYOUT=$(localectl status | grep "X11 Layout" | awk -F: '{print $2}' | xargs)
+CURRENT_LAYOUT=${CURRENT_LAYOUT:-"us"}
 HYPR_CONFIG="$USER_HOME/.config/hypr/hyprland.conf"
 
 if [ -f "$HYPR_CONFIG" ]; then
-    sed -i "/^keyboard_layout/d" "$HYPR_CONFIG"
-    echo "keyboard_layout = $CURRENT_LAYOUT" >> "$HYPR_CONFIG"
+    # Remove existing input block if present
+    sed -i "/^input {/,/^}/d" "$HYPR_CONFIG"
+
+    # Append new input block
+    cat <<EOF >> "$HYPR_CONFIG"
+input {
+    kb_layout = $CURRENT_LAYOUT
+}
+EOF
+
     echo "[✓] Hyprland keyboard layout set to '$CURRENT_LAYOUT'."
 else
     echo "[!] Hyprland configuration file not found at '$HYPR_CONFIG'. Skipping keyboard setup."
@@ -178,7 +188,7 @@ echo "[+] Cleaning up..."
 sudo pacman -Sc --noconfirm
 yay -Sc --noconfirm
 rm -rf /tmp/yay
-rm -rf "$USER_HOME/.cache/"{*,.*} 2>/dev/null || true
+rm -rf "$USER_HOME/.cache/"* 2>/dev/null || true
 echo "[✓] Cleanup completed"
 
 ### === DONE ===
