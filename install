@@ -55,33 +55,71 @@ else
 fi
 
 ### === GPU DRIVERS ===
-echo "\n[+] Detecting GPU..."
-GPU_INFO=$(sudo lspci | grep -E "VGA|3D" || true)
+echo "\n[+] Iniciando detección avanzada de GPU..."
 
-if echo "$GPU_INFO" | grep -qi intel; then
-    echo "[✓] Intel GPU detected"
-    sudo pacman -S --needed --noconfirm \
-    mesa intel-media-driver libva libva-intel-driver vulkan-intel
-fi
+# Obtenemos todas las GPUs y las guardamos en un array
+mapfile -t ALL_GPUS < <(lspci -mm | grep -E "VGA|3D" | tr -d '"')
 
-if echo "$GPU_INFO" | grep -qi amd; then
-    echo "[✓] AMD GPU detected"
-    sudo pacman -S --needed --noconfirm \
-    mesa xf86-video-amdgpu libva-mesa-driver vulkan-radeon
-fi
+GPU_COUNT=${#ALL_GPUS[@]}
+SELECTED_GPU=""
 
-if echo "$GPU_INFO" | grep -qi nvidia; then
-    echo "[✓] NVIDIA GPU detected"
-    sudo pacman -S --needed --noconfirm \
-    nvidia-open-dkms nvidia-utils lib32-nvidia-utils nvidia-settings egl-wayland
-
-    echo "\n[+] Configuring NVIDIA for Wayland..."
-    echo "options nvidia_drm modeset=1" | sudo tee /etc/modprobe.d/nvidia.conf >/dev/null
-    sudo modprobe nvidia_drm || true
-    echo "[✓] NVIDIA configuration complete."
+if [ "$GPU_COUNT" -eq 0 ]; then
+    echo "[!] No se detectó hardware gráfico. Revisar conexión física."
+    exit 1
+elif [ "$GPU_COUNT" -eq 1 ]; then
+    SELECTED_GPU="${ALL_GPUS[0]}"
+    echo "[✓] Una sola GPU detectada: $(echo "$SELECTED_GPU" | awk -F': ' '{print $4}')"
 else
-    echo "[✓] No GPU detected."
+    echo "[!] Sistema Multi-GPU detectado."
+    echo "-------------------------------------------------------"
+    # Listar GPUs con su índice para que el usuario elija
+    for i in "${!ALL_GPUS[@]}"; do
+        GPU_NAME=$(echo "${ALL_GPUS[$i]}" | awk -F' ' '{for(j=4;j<=NF;j++) printf "%s ", $j; print ""}')
+        # Un truco: las integradas suelen estar en el slot 00:02.0 o 00:01.0
+        if [[ "${ALL_GPUS[$i]}" =~ ^00:02\. || "${ALL_GPUS[$i]}" =~ ^00:01\. ]]; then
+            echo "  $((i+1))) [INTEGRADA] $GPU_NAME"
+        else
+            echo "  $((i+1))) [DEDICADA]  $GPU_NAME"
+        fi
+    done
+    echo "-------------------------------------------------------"
+
+    read -p "Selecciona el número de la GPU principal para tu Rice: " choice
+    SELECTED_GPU="${ALL_GPUS[$((choice-1))]}"
 fi
+
+# === LÓGICA DE INSTALACIÓN (Case insensitive) ===
+GPU_LOWER=$(echo "$SELECTED_GPU" | tr '[:upper:]' '[:lower:]')
+
+case "$GPU_LOWER" in
+    *nvidia*)
+        echo "[+] Instalando drivers NVIDIA (Propietarios)..."
+        sudo pacman -S --needed --noconfirm \
+        nvidia-open-dkms nvidia-utils lib32-nvidia-utils nvidia-settings egl-wayland
+
+        echo "\n[+] Configuring NVIDIA for Wayland..."
+        echo "options nvidia_drm modeset=1" | sudo tee /etc/modprobe.d/nvidia.conf >/dev/null
+        sudo modprobe nvidia_drm || true
+        echo "[✓] NVIDIA configuration complete."
+        ;;
+    *amd*|*radeon*)
+        echo "[+] Instalando drivers AMD (Mesa/Open Source)..."
+        sudo pacman -S --needed --noconfirm \
+        mesa xf86-video-amdgpu libva-mesa-driver vulkan-radeon
+        ;;
+    *intel*)
+        echo "[+] Instalando drivers Intel (Mesa/Open Source)..."
+        sudo pacman -S --needed --noconfirm \
+        mesa intel-media-driver libva-intel-driver vulkan-intel
+        ;;
+    *)
+        echo "[!] No se pudo determinar el fabricante de: $SELECTED_GPU"
+        echo "Instalando mesa genérico por seguridad..."
+        sudo pacman -S --needed --noconfirm mesa
+        ;;
+esac
+
+echo "[✓] Instalación de drivers finalizada."
 
 ### === PACKAGES ===
 echo "\n[+] Installing packages..."
