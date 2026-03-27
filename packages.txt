@@ -5,9 +5,12 @@ hyprland                     # Wayland compositor (main graphical environment)
 xdg-desktop-portal           # portal support for sandboxed apps (Flatpak, etc.)
 xdg-desktop-portal-hyprland  # Hyprland-specific integration for XDG portals
 xdg-desktop-portal-gtk       # GTK environment integration for XDG portals
+nwg-look                     # GTK theming tool for Wayland
+gradience                    # GTK4/libadwaita color customizer
 hypridle                     # manages idle behavior, screen locking, and suspend
 hyprlock                     # screen locker
 hyprshot                     # screenshot tool for Wayland
+hyprpicker                   # color picker
 swww                         # wallpaper engine
 rofi-wayland                 # launcher used to launch applications with a GUI
 mako                         # A lightweight notification daemon
@@ -25,6 +28,7 @@ sddm                         # display manager (login screen)
 # Fonts
 # -----------------------------
 ttf-jetbrains-mono-nerd      # Nerd Font with icons for terminal and widgets
+ttf-nerd-fonts-symbols       # Fallback icon font
 ttf-font-awesome             # icon fonts for apps and widgets
 noto-fonts                   # general-purpose font family
 noto-fonts-emoji             # emoji support for terminal and apps
@@ -34,8 +38,9 @@ noto-fonts-cjk               # CJK character support (Chinese, Japanese, Korean)
 # Terminal and utilities
 # -----------------------------
 kitty                        # GPU-accelerated terminal emulator
+tmux                         # Terminal multiplexer
 fastfetch                    # system information tool similar to neofetch
-starship                     # customizable and advanced shell prompt
+oh-my-posh                   # customizable and advanced shell prompt
 fzf                          # fuzzy finder for the terminal
 lsd                          # modern ls replacement with colors and icons
 bat                          # enhanced cat with syntax highlighting and line numbers
