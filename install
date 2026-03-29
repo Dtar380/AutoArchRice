@@ -1,242 +1,787 @@
 #!/bin/bash
+# =============================================================================
+#  Rice Installer — Hardened Edition
+#  Usage:
+#    ./install           → full install (default: run mode)
+#    ./install --check   → preflight checks only, no changes
+#    ./install --run     → full install (explicit)
+#    ./install --resume  → resume from last successful phase
+# =============================================================================
 
-set -e
+set -euo pipefail
 
-### === LOG ===
-LOG_FILE="install-$(date +%Y%m%d_%H%M%S).log"
-exec > >(tee -i "$LOG_FILE")
-exec 2>&1
+# =============================================================================
+#  CONSTANTS & GLOBAL STATE
+# =============================================================================
+readonly SCRIPT_VERSION="2.0.0"
+readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly LOG_FILE="$SCRIPT_DIR/install-$(date +%Y%m%d_%H%M%S).log"
+readonly STATE_FILE="$SCRIPT_DIR/.install_state"
+readonly BACKUP_DIR="$HOME/.dotfiles_backup/$(date +%Y%m%d_%H%M%S)"
+readonly PACKAGE_LIST="$SCRIPT_DIR/packages.txt"
+readonly MIN_DISK_MB=5120   # 5 GB minimum free space
+readonly SUDO_KEEPALIVE_PID_FILE="/tmp/rice_sudo_keepalive.pid"
 
-### === CONFIG ===
-REPO_DIR="$(pwd)"
-USER_HOME="$HOME"
+# Phases — order matters for resume
+readonly -a PHASES=(
+    preflight
+    base_system
+    aur_helper
+    gpu_drivers
+    packages
+    zsh
+    services
+    dotfiles
+    hyprland_keyboard
+    finalize
+)
 
-### === SUDO ===
-echo "\n[+] Requesting sudo permissions..."
-sudo -v
+# Installer mode (set from CLI args)
+MODE="run"
 
-while true; do
+# Counters for the final report
+FAILED_PACKAGES=()
+FAILED_SERVICES=()
+SKIPPED_PHASES=()
+
+# =============================================================================
+#  LOGGING HELPERS
+# =============================================================================
+# All output goes to stdout AND the log file.
+exec > >(tee -i "$LOG_FILE") 2>&1
+
+_log() {
+    local level="$1"; shift
+    local symbol color reset
+    reset="\e[0m"
+    case "$level" in
+        INFO)  symbol="[→]"; color="\e[34m" ;;   # blue
+        OK)    symbol="[✓]"; color="\e[32m" ;;   # green
+        WARN)  symbol="[!]"; color="\e[33m" ;;   # yellow
+        ERROR) symbol="[✗]"; color="\e[31m" ;;   # red
+        STEP)  symbol="[▶]"; color="\e[36m" ;;   # cyan
+    esac
+    echo -e "${color}${symbol} $*${reset}"
+}
+
+log_info()  { _log INFO  "$@"; }
+log_ok()    { _log OK    "$@"; }
+log_warn()  { _log WARN  "$@"; }
+log_error() { _log ERROR "$@"; }
+log_step()  { echo; _log STEP "=== $* ==="; }
+
+# =============================================================================
+#  TRAP: ERROR + CLEANUP
+# =============================================================================
+_on_error() {
+    local exit_code=$?
+    local line_no=$1
+    local command="$2"
+    log_error "Script failed at line ${line_no}: '${command}' (exit code: ${exit_code})"
+    log_error "Check the log for details: $LOG_FILE"
+    _cleanup
+    exit "$exit_code"
+}
+
+_cleanup() {
+    # Stop sudo keepalive background process if running
+    if [[ -f "$SUDO_KEEPALIVE_PID_FILE" ]]; then
+        local kpid
+        kpid=$(cat "$SUDO_KEEPALIVE_PID_FILE" 2>/dev/null || true)
+        if [[ -n "$kpid" ]] && kill -0 "$kpid" 2>/dev/null; then
+            kill "$kpid" 2>/dev/null || true
+        fi
+        rm -f "$SUDO_KEEPALIVE_PID_FILE"
+    fi
+}
+
+trap '_on_error $LINENO "$BASH_COMMAND"' ERR
+trap '_cleanup' EXIT
+
+# =============================================================================
+#  PHASE CHECKPOINT SYSTEM
+# =============================================================================
+phase_is_done() {
+    [[ -f "$STATE_FILE" ]] && grep -qx "$1" "$STATE_FILE"
+}
+
+phase_mark_done() {
+    echo "$1" >> "$STATE_FILE"
+    log_ok "Phase '$1' complete."
+}
+
+phase_run() {
+    local phase="$1"; shift
+    if [[ "$MODE" == "resume" ]] && phase_is_done "$phase"; then
+        log_info "Skipping phase '$phase' (already completed)."
+        SKIPPED_PHASES+=("$phase")
+        return 0
+    fi
+    log_step "$phase"
+    "$@"
+    phase_mark_done "$phase"
+}
+
+# =============================================================================
+#  SUDO KEEPALIVE
+# =============================================================================
+_start_sudo_keepalive() {
     sudo -v
-    sleep 60
-    kill -0 "$$" || exit
-done 2>/dev/null &
+    (
+        while true; do
+            sudo -v
+            sleep 55
+        done
+    ) &
+    echo $! > "$SUDO_KEEPALIVE_PID_FILE"
+    log_info "Sudo keepalive started (PID: $(cat "$SUDO_KEEPALIVE_PID_FILE"))."
+}
 
-### === INSTALLATION STEPS ===
-echo "\n[+] Updating system..."
-sudo pacman -Syu --noconfirm
-echo "[✓] System update complete."
+# =============================================================================
+#  PHASE: PREFLIGHT
+# =============================================================================
+do_preflight() {
+    local errors=0
 
-if ! grep -q "^\[multilib\]" /etc/pacman.conf; then
-    echo "\n[+] Enabling multilib repository..."
-    sudo sed -i '/\[multilib\]/,/Include/s/^#//' /etc/pacman.conf
-    sudo pacman -Sy --noconfirm
-    echo "[✓] multilib enabled"
-else
-    echo "[✓] multilib already enabled"
-fi
+    # --- Check: not running as root ---
+    if [[ "$EUID" -eq 0 ]]; then
+        log_error "Do not run this script as root. Run it as your normal user."
+        (( errors++ ))
+    else
+        log_ok "Not running as root."
+    fi
 
-echo "\n[+] Installing base dependencies..."
-KERNEL_PKG=$(pacman -Q | grep -E '^linux(-lts|-zen)? ' | awk '{print $1}')
-sudo pacman -S --needed --noconfirm \
-    git base-devel "${KERNEL_PKG}-headers" curl wget unzip vim \
-    pciutils brightnessctl rsync lua python jq
-echo "[✓] Base dependencies installation complete."
+    # --- Check: Arch Linux only ---
+    if [[ ! -f /etc/arch-release ]]; then
+        log_error "This installer is for Arch Linux only. /etc/arch-release not found."
+        (( errors++ ))
+    else
+        log_ok "Arch Linux detected."
+    fi
 
-### === AUR HELPER INSTALLATION ===
-if ! command -v yay &>/dev/null; then
-    echo "\n[+] Installing YAY AUR helper..."
-    git clone https://aur.archlinux.org/yay.git /tmp/yay
-    cd /tmp/yay
-    makepkg -si --noconfirm
-    cd "$REPO_DIR"
-    echo "[✓] YAY installation complete."
-else
-    echo "[✓] YAY is already installed."
-fi
+    # --- Check: sudo available and works ---
+    if ! command -v sudo &>/dev/null; then
+        log_error "sudo not found. Install it first: pacman -S sudo"
+        (( errors++ ))
+    elif ! sudo -n true 2>/dev/null && ! sudo -v; then
+        log_error "Could not obtain sudo privileges."
+        (( errors++ ))
+    else
+        log_ok "sudo is available and working."
+    fi
 
-### === GPU DRIVERS ===
-echo "\n[+] Iniciando detección avanzada de GPU..."
+    # --- Check: internet connectivity ---
+    if ! curl -fsS --max-time 5 https://archlinux.org/mirrorlist/ -o /dev/null; then
+        log_error "No internet connection (archlinux.org unreachable)."
+        (( errors++ ))
+    else
+        log_ok "Internet connection available."
+    fi
 
-# Obtenemos todas las GPUs y las guardamos en un array
-mapfile -t ALL_GPUS < <(lspci -mm | grep -E "VGA|3D" | tr -d '"')
+    # --- Check: free disk space ---
+    local free_mb
+    free_mb=$(df -m / | awk 'NR==2{print $4}')
+    if [[ "$free_mb" -lt "$MIN_DISK_MB" ]]; then
+        log_error "Insufficient disk space: ${free_mb}MB free, need ${MIN_DISK_MB}MB."
+        (( errors++ ))
+    else
+        log_ok "Disk space OK: ${free_mb}MB free."
+    fi
 
-GPU_COUNT=${#ALL_GPUS[@]}
-SELECTED_GPU=""
-
-if [ "$GPU_COUNT" -eq 0 ]; then
-    echo "[!] No se detectó hardware gráfico. Revisar conexión física."
-    exit 1
-elif [ "$GPU_COUNT" -eq 1 ]; then
-    SELECTED_GPU="${ALL_GPUS[0]}"
-    echo "[✓] Una sola GPU detectada: $(echo "$SELECTED_GPU" | awk -F': ' '{print $4}')"
-else
-    echo "[!] Sistema Multi-GPU detectado."
-    echo "-------------------------------------------------------"
-    # Listar GPUs con su índice para que el usuario elija
-    for i in "${!ALL_GPUS[@]}"; do
-        GPU_NAME=$(echo "${ALL_GPUS[$i]}" | awk -F' ' '{for(j=4;j<=NF;j++) printf "%s ", $j; print ""}')
-        # Un truco: las integradas suelen estar en el slot 00:02.0 o 00:01.0
-        if [[ "${ALL_GPUS[$i]}" =~ ^00:02\. || "${ALL_GPUS[$i]}" =~ ^00:01\. ]]; then
-            echo "  $((i+1))) [INTEGRADA] $GPU_NAME"
-        else
-            echo "  $((i+1))) [DEDICADA]  $GPU_NAME"
+    # --- Check: required tools exist ---
+    local required_tools=(git curl rsync lspci localectl pacman)
+    for tool in "${required_tools[@]}"; do
+        if ! command -v "$tool" &>/dev/null; then
+            log_error "Required tool not found: $tool"
+            (( errors++ ))
         fi
     done
-    echo "-------------------------------------------------------"
+    if [[ $errors -eq 0 ]] || [[ "${#required_tools[@]}" -gt 0 ]]; then
+        log_ok "Required tools check passed."
+    fi
 
-    read -p "Selecciona el número de la GPU principal para tu Rice: " choice
-    SELECTED_GPU="${ALL_GPUS[$((choice-1))]}"
-fi
+    # --- Check: packages.txt readable with at least one package ---
+    if [[ ! -f "$PACKAGE_LIST" ]]; then
+        log_error "Package list not found: $PACKAGE_LIST"
+        (( errors++ ))
+    elif [[ ! -r "$PACKAGE_LIST" ]]; then
+        log_error "Package list is not readable: $PACKAGE_LIST"
+        (( errors++ ))
+    else
+        local pkg_count
+        pkg_count=$(grep -Evc '^\s*#|^\s*$' "$PACKAGE_LIST" || true)
+        if [[ "$pkg_count" -lt 1 ]]; then
+            log_error "Package list '$PACKAGE_LIST' has no valid packages."
+            (( errors++ ))
+        else
+            log_ok "Package list found with ${pkg_count} packages."
+        fi
+    fi
 
-# === LÓGICA DE INSTALACIÓN (Case insensitive) ===
-GPU_LOWER=$(echo "$SELECTED_GPU" | tr '[:upper:]' '[:lower:]')
+    # --- Check: script is being run from its own directory ---
+    if [[ "$SCRIPT_DIR" != "$(pwd)" ]]; then
+        log_warn "Script is not being run from its own directory."
+        log_warn "Expected: $SCRIPT_DIR — Got: $(pwd)"
+        log_warn "Relative paths (dotfiles/, packages.txt) may not resolve correctly."
+    fi
 
-case "$GPU_LOWER" in
-    *nvidia*)
-        echo "[+] Instalando drivers NVIDIA (Propietarios)..."
-        sudo pacman -S --needed --noconfirm \
-        nvidia-open-dkms nvidia-utils lib32-nvidia-utils nvidia-settings egl-wayland
+    if [[ "$errors" -gt 0 ]]; then
+        log_error "Preflight failed with $errors error(s). Fix the issues above and re-run."
+        exit 1
+    fi
 
-        echo "\n[+] Configuring NVIDIA for Wayland..."
-        echo "options nvidia_drm modeset=1" | sudo tee /etc/modprobe.d/nvidia.conf >/dev/null
-        sudo modprobe nvidia_drm || true
-        echo "[✓] NVIDIA configuration complete."
-        ;;
-    *amd*|*radeon*)
-        echo "[+] Instalando drivers AMD (Mesa/Open Source)..."
-        sudo pacman -S --needed --noconfirm \
-        mesa xf86-video-amdgpu libva-mesa-driver vulkan-radeon
-        ;;
-    *intel*)
-        echo "[+] Instalando drivers Intel (Mesa/Open Source)..."
-        sudo pacman -S --needed --noconfirm \
-        mesa intel-media-driver libva-intel-driver vulkan-intel
-        ;;
-    *)
-        echo "[!] No se pudo determinar el fabricante de: $SELECTED_GPU"
-        echo "Instalando mesa genérico por seguridad..."
+    log_ok "All preflight checks passed."
+
+    # If check-only mode, exit cleanly here
+    if [[ "$MODE" == "check" ]]; then
+        echo
+        log_ok "Check mode complete. No changes were made."
+        exit 0
+    fi
+}
+
+# =============================================================================
+#  PHASE: BASE SYSTEM
+# =============================================================================
+do_base_system() {
+    log_info "Updating system..."
+    sudo pacman -Syu --noconfirm
+    log_ok "System updated."
+
+    # Enable multilib if not already enabled
+    if ! grep -q "^\[multilib\]" /etc/pacman.conf; then
+        log_info "Enabling multilib repository..."
+        sudo sed -i '/\[multilib\]/{n;s/^#//}' /etc/pacman.conf
+        sudo sed -i 's/^#\(\[multilib\]\)/\1/' /etc/pacman.conf
+        sudo pacman -Sy --noconfirm
+        log_ok "multilib enabled."
+    else
+        log_ok "multilib already enabled."
+    fi
+
+    # Detect kernel package (handle multiple kernels: pick the first running one)
+    local running_kernel
+    running_kernel=$(uname -r)
+    local kernel_pkg=""
+    for candidate in linux linux-lts linux-zen linux-hardened; do
+        if pacman -Q "$candidate" &>/dev/null; then
+            kernel_pkg="$candidate"
+            break
+        fi
+    done
+
+    if [[ -z "$kernel_pkg" ]]; then
+        log_warn "Could not detect kernel package. Skipping headers installation."
+    else
+        log_info "Detected kernel: $kernel_pkg (running: $running_kernel)"
+    fi
+
+    log_info "Installing base dependencies..."
+    local base_deps=(git base-devel curl wget unzip vim pciutils brightnessctl rsync lua python jq)
+    [[ -n "$kernel_pkg" ]] && base_deps+=("${kernel_pkg}-headers")
+
+    sudo pacman -S --needed --noconfirm "${base_deps[@]}"
+    log_ok "Base dependencies installed."
+}
+
+# =============================================================================
+#  PHASE: AUR HELPER (yay)
+# =============================================================================
+do_aur_helper() {
+    if command -v yay &>/dev/null; then
+        log_ok "yay is already installed."
+        return
+    fi
+
+    log_info "Installing yay AUR helper..."
+    local yay_build_dir="/tmp/yay-build-$$"
+    git clone https://aur.archlinux.org/yay.git "$yay_build_dir"
+    pushd "$yay_build_dir" > /dev/null
+    makepkg -si --noconfirm
+    popd > /dev/null
+    rm -rf "$yay_build_dir"
+    log_ok "yay installed."
+}
+
+# =============================================================================
+#  PHASE: GPU DRIVERS
+# =============================================================================
+do_gpu_drivers() {
+    log_info "Detecting GPU hardware..."
+
+    mapfile -t ALL_GPUS < <(lspci -mm | grep -E '"VGA|"3D' | tr -d '"' || true)
+    local GPU_COUNT=${#ALL_GPUS[@]}
+    local SELECTED_GPU=""
+
+    if [[ "$GPU_COUNT" -eq 0 ]]; then
+        log_warn "No GPU hardware detected via lspci."
+        read -rp "Continue with generic Mesa fallback? [y/N]: " fallback_confirm
+        if [[ ! "$fallback_confirm" =~ ^[Yy]$ ]]; then
+            log_error "GPU detection failed and user chose not to continue. Aborting."
+            exit 1
+        fi
+        log_info "Installing generic Mesa fallback..."
         sudo pacman -S --needed --noconfirm mesa
-        ;;
-esac
+        log_ok "Generic Mesa installed."
+        return
+    elif [[ "$GPU_COUNT" -eq 1 ]]; then
+        SELECTED_GPU="${ALL_GPUS[0]}"
+        log_ok "Single GPU detected."
+    else
+        log_info "Multiple GPUs detected:"
+        echo "-------------------------------------------------------"
+        for i in "${!ALL_GPUS[@]}"; do
+            local gpu_name tag
+            gpu_name=$(echo "${ALL_GPUS[$i]}" | cut -d' ' -f4-)
+            if [[ "${ALL_GPUS[$i]}" =~ ^00:0[12]\. ]]; then
+                tag="[INTEGRATED]"
+            else
+                tag="[DEDICATED] "
+            fi
+            echo "  $((i+1))) $tag $gpu_name"
+        done
+        echo "-------------------------------------------------------"
 
-echo "[✓] Instalación de drivers finalizada."
+        # Validated input loop
+        local choice
+        while true; do
+            read -rp "Select your primary GPU number [1-${GPU_COUNT}]: " choice
+            if [[ "$choice" =~ ^[0-9]+$ ]] && \
+               [[ "$choice" -ge 1 ]] && \
+               [[ "$choice" -le "$GPU_COUNT" ]]; then
+                break
+            fi
+            log_warn "Invalid selection '$choice'. Please enter a number between 1 and ${GPU_COUNT}."
+        done
+        SELECTED_GPU="${ALL_GPUS[$((choice-1))]}"
+    fi
 
-### === PACKAGES ===
-echo "\n[+] Installing packages..."
-PACKAGE_LIST="packages.txt"
+    # Confirm before installing
+    local selected_name
+    selected_name=$(echo "$SELECTED_GPU" | cut -d' ' -f4-)
+    echo
+    log_info "Selected GPU: $selected_name"
+    read -rp "Install drivers for this GPU? [Y/n]: " gpu_confirm
+    if [[ "$gpu_confirm" =~ ^[Nn]$ ]]; then
+        log_warn "GPU driver installation skipped by user."
+        return
+    fi
 
-if [ -f "$PACKAGE_LIST" ]; then
-    grep -Ev '^\s*#|^\s*$' "$PACKAGE_LIST" | sed 's/#.*//' | xargs yay -S --needed --noconfirm
-    echo "[✓] Package installation complete."
-else
-    echo "[!] Package list file '$PACKAGE_LIST' not found!"
-fi
+    local gpu_lower
+    gpu_lower=$(echo "$SELECTED_GPU" | tr '[:upper:]' '[:lower:]')
 
-### === ZSH INSTALLATION ===
-echo "\n[+] Installing Zsh and setting it as default shell..."
-sudo pacman -S --needed --noconfirm zsh
-chsh_path=$(which zsh)
-chsh -s "$chsh_path" "$USER"
-echo "[✓] Zsh installation and default shell change complete."
+    case "$gpu_lower" in
+        *nvidia*)
+            log_warn "Note: nvidia-open-dkms requires Turing (RTX 20xx) or newer."
+            log_warn "If you have an older card (GTX 10xx or earlier), you may need 'nvidia-dkms' instead."
+            read -rp "Continue with nvidia-open-dkms? [Y/n]: " nv_confirm
+            if [[ "$nv_confirm" =~ ^[Nn]$ ]]; then
+                log_info "Skipping NVIDIA driver installation."
+                return
+            fi
+            log_info "Installing NVIDIA drivers (nvidia-open-dkms)..."
+            sudo pacman -S --needed --noconfirm \
+                nvidia-open-dkms nvidia-utils lib32-nvidia-utils nvidia-settings egl-wayland
+            log_info "Configuring NVIDIA for Wayland (modeset)..."
+            echo "options nvidia_drm modeset=1 fbdev=1" | sudo tee /etc/modprobe.d/nvidia.conf >/dev/null
+            sudo modprobe nvidia_drm || log_warn "Could not modprobe nvidia_drm (will take effect on next boot)."
+            log_ok "NVIDIA drivers configured."
+            ;;
+        *amd*|*radeon*)
+            log_info "Installing AMD drivers (Mesa/open source)..."
+            sudo pacman -S --needed --noconfirm \
+                mesa xf86-video-amdgpu libva-mesa-driver vulkan-radeon lib32-mesa lib32-vulkan-radeon
+            log_ok "AMD drivers installed."
+            ;;
+        *intel*)
+            log_info "Installing Intel drivers (Mesa/open source)..."
+            sudo pacman -S --needed --noconfirm \
+                mesa intel-media-driver libva-intel-driver vulkan-intel lib32-mesa
+            log_ok "Intel drivers installed."
+            ;;
+        *)
+            log_warn "Could not identify GPU vendor for: $selected_name"
+            log_info "Installing generic Mesa as fallback..."
+            sudo pacman -S --needed --noconfirm mesa
+            log_ok "Generic Mesa installed."
+            ;;
+    esac
+}
 
-### === SERVICES ===
-echo "\n[+] Installing service packages..."
-sudo pacman -S --needed --noconfirm \
-    networkmanager network-manager-applet \
-    bluez bluez-utils \
-    pipewire pipewire-pulse wireplumber pavucontrol
-echo "[✓] Service packages installation complete."
+# =============================================================================
+#  PHASE: ZSH
+# =============================================================================
+do_zsh() {
+    log_info "Installing Zsh..."
+    sudo pacman -S --needed --noconfirm zsh
+    local zsh_path
+    zsh_path=$(which zsh)
+    if [[ "$SHELL" == "$zsh_path" ]]; then
+        log_ok "Zsh is already the default shell."
+    else
+        chsh -s "$zsh_path" "$USER"
+        log_ok "Default shell changed to Zsh ($zsh_path)."
+    fi
+}
 
-echo "\n[+] Enabling services..."
-sudo systemctl enable --now NetworkManager
-sudo systemctl enable --now bluetooth
-systemctl --user enable --now pipewire pipewire-pulse wireplumber
-echo "[✓] Services installation and enabling complete."
+# =============================================================================
+#  PHASE: SERVICES
+# =============================================================================
+_unit_exists() {
+    systemctl list-unit-files --full --no-legend "$1" 2>/dev/null | grep -q "$1"
+}
 
-### === DOTFILES ===
-echo "\n[+] Installing dotfiles..."
+_enable_system_service() {
+    local unit="$1"
+    if ! _unit_exists "$unit"; then
+        log_warn "System unit '$unit' not found, skipping."
+        FAILED_SERVICES+=("$unit (not found)")
+        return
+    fi
+    if sudo systemctl enable --now "$unit"; then
+        if sudo systemctl is-active --quiet "$unit"; then
+            log_ok "Service '$unit' enabled and active."
+        else
+            log_warn "Service '$unit' enabled but not yet active (may require reboot)."
+        fi
+    else
+        log_warn "Failed to enable service '$unit'."
+        FAILED_SERVICES+=("$unit")
+    fi
+}
 
-# Create necessary directories
-mkdir -p "$USER_HOME/.config"
-mkdir -p "$USER_HOME/.local/bin" "$USER_HOME/.local/share"
+_enable_user_service() {
+    local unit="$1"
+    if systemctl --user enable --now "$unit" 2>/dev/null; then
+        log_ok "User service '$unit' enabled."
+    else
+        log_warn "Failed to enable user service '$unit'. May require a graphical session or reboot."
+        FAILED_SERVICES+=("user:$unit")
+    fi
+}
 
-# Home files
-if [ -d "dotfiles/home" ]; then
-    echo "\n[+] Syncing home directory files..."
-    rsync -av dotfiles/home/ "$USER_HOME/"
-    echo "[✓] Home files sync complete."
-else
-    echo "[!] 'dotfiles/home' directory not found, skipping home files sync."
-fi
+do_services() {
+    log_info "Installing service packages..."
+    sudo pacman -S --needed --noconfirm \
+        networkmanager network-manager-applet \
+        bluez bluez-utils \
+        pipewire pipewire-pulse wireplumber pavucontrol
+    log_ok "Service packages installed."
 
-# Config files
-if [ -d "dotfiles/config" ]; then
-    echo "\n[+] Syncing config directory files..."
-    for folder in dotfiles/config/*; do
-        app=$(basename "$folder")
-        rsync -av --ignore-existing "$folder/" "$USER_HOME/.config/$app/"
+    log_info "Enabling services..."
+
+    # NetworkManager
+    _enable_system_service NetworkManager
+
+    # Bluetooth — only if hardware is present
+    if rfkill list bluetooth &>/dev/null || lsusb 2>/dev/null | grep -qi bluetooth || \
+       lspci 2>/dev/null | grep -qi bluetooth; then
+        _enable_system_service bluetooth
+    else
+        log_info "No Bluetooth hardware detected, skipping bluetooth service."
+    fi
+
+    # PipeWire user services
+    _enable_user_service pipewire
+    _enable_user_service pipewire-pulse
+    _enable_user_service wireplumber
+
+    log_ok "Service configuration complete."
+}
+
+# =============================================================================
+#  PHASE: PACKAGES (per-package loop with retry)
+# =============================================================================
+do_packages() {
+    log_info "Reading package list from $PACKAGE_LIST..."
+
+    mapfile -t PACKAGES < <(grep -Ev '^\s*#|^\s*$' "$PACKAGE_LIST" | sed 's/\s*#.*//' | tr -s ' ' '\n' | grep -v '^$')
+
+    local total="${#PACKAGES[@]}"
+    log_info "Installing $total packages..."
+
+    local first_pass_failed=()
+
+    for pkg in "${PACKAGES[@]}"; do
+        log_info "  Installing: $pkg"
+        if ! yay -S --needed --noconfirm "$pkg" 2>&1; then
+            log_warn "  Failed on first attempt: $pkg"
+            first_pass_failed+=("$pkg")
+        fi
     done
-    echo "[✓] Config files sync complete."
-else
-    echo "[!] 'dotfiles/config' directory not found, skipping config files sync."
-fi
 
-# Local files
-if [ -d "dotfiles/local" ]; then
-    echo "\n[+] Syncing local directory files..."
-    for folder in dotfiles/local/*; do
-        app=$(basename "$folder")
-        rsync -av --ignore-existing "$folder/" "$USER_HOME/.local/$app/"
-    done
-    echo "[✓] Local files sync complete."
-else
-    echo "[!] 'dotfiles/local' directory not found, skipping local files sync."
-fi
+    # --- Retry pass ---
+    if [[ "${#first_pass_failed[@]}" -gt 0 ]]; then
+        log_warn "${#first_pass_failed[@]} package(s) failed. Retrying once..."
+        for pkg in "${first_pass_failed[@]}"; do
+            log_info "  Retrying: $pkg"
+            if ! yay -S --needed --noconfirm "$pkg" 2>&1; then
+                log_error "  Still failing after retry: $pkg"
+                FAILED_PACKAGES+=("$pkg")
+            else
+                log_ok "  Retry succeeded: $pkg"
+            fi
+        done
+    fi
 
-echo "[✓] Dotfiles installation complete."
+    if [[ "${#FAILED_PACKAGES[@]}" -gt 0 ]]; then
+        log_warn "The following packages could not be installed:"
+        for pkg in "${FAILED_PACKAGES[@]}"; do
+            echo "    - $pkg"
+        done
+        log_warn "You can retry them manually with:"
+        echo "    yay -S --needed ${FAILED_PACKAGES[*]}"
+    else
+        log_ok "All packages installed successfully."
+    fi
+}
 
-### === DIRECTORIES ===
-echo "\n[+] Creating user directories..."
-mkdir -p "$USER_HOME/Documents" "$USER_HOME/Downloads" "$USER_HOME/Images" "$USER_HOME/Videos" "$USER_HOME/Music"
+# =============================================================================
+#  PHASE: DOTFILES (idempotent, with backups, consistent policy)
+# =============================================================================
+_sync_dir() {
+    local label="$1"
+    local src_dir="$2"
+    local dest_dir="$3"
 
-### === HYPRLAND KEYBOARD ===
-echo "\n[+] Setting up Hyprland keyboard configuration..."
-CURRENT_LAYOUT=$(localectl status | grep "X11 Layout" | awk -F: '{print $2}' | xargs)
-CURRENT_LAYOUT=${CURRENT_LAYOUT:-"us"}
-HYPR_CONFIG="$USER_HOME/.config/hypr/hyprland.conf"
+    if [[ ! -d "$src_dir" ]]; then
+        log_warn "'$src_dir' not found, skipping $label sync."
+        return
+    fi
 
-if [ -f "$HYPR_CONFIG" ]; then
-    # Remove existing input block if present
-    sed -i "/^input {/,/^}/d" "$HYPR_CONFIG"
+    mkdir -p "$dest_dir"
+    log_info "Syncing $label: $src_dir → $dest_dir"
+    # --backup-dir keeps dated backups of anything overwritten
+    rsync -av \
+        --backup \
+        --backup-dir="$BACKUP_DIR/$label" \
+        "$src_dir/" "$dest_dir/"
+    log_ok "$label sync complete."
+}
 
-    # Append new input block
-    cat <<EOF >> "$HYPR_CONFIG"
+do_dotfiles() {
+    mkdir -p "$HOME/.config" "$HOME/.local/bin" "$HOME/.local/share"
+    mkdir -p "$BACKUP_DIR"
+
+    # Home files (flat copy)
+    _sync_dir "home" "$SCRIPT_DIR/dotfiles/home" "$HOME"
+
+    # Config files (per-app subdirectories)
+    shopt -s nullglob
+    if [[ -d "$SCRIPT_DIR/dotfiles/config" ]]; then
+        for folder in "$SCRIPT_DIR/dotfiles/config"/*/; do
+            local app
+            app=$(basename "$folder")
+            _sync_dir "config/$app" "$folder" "$HOME/.config/$app"
+        done
+    else
+        log_warn "'dotfiles/config' directory not found, skipping config sync."
+    fi
+
+    # Local files (per-app subdirectories)
+    if [[ -d "$SCRIPT_DIR/dotfiles/local" ]]; then
+        for folder in "$SCRIPT_DIR/dotfiles/local"/*/; do
+            local app
+            app=$(basename "$folder")
+            _sync_dir "local/$app" "$folder" "$HOME/.local/$app"
+        done
+    else
+        log_warn "'dotfiles/local' directory not found, skipping local sync."
+    fi
+    shopt -u nullglob
+
+    if [[ -d "$BACKUP_DIR" ]] && [[ -n "$(ls -A "$BACKUP_DIR" 2>/dev/null)" ]]; then
+        log_info "Backups of overwritten files saved to: $BACKUP_DIR"
+    fi
+
+    log_ok "Dotfiles installation complete."
+}
+
+# =============================================================================
+#  PHASE: HYPRLAND KEYBOARD (managed include file)
+# =============================================================================
+do_hyprland_keyboard() {
+    local hypr_config_dir="$HOME/.config/hypr"
+    local managed_file="$hypr_config_dir/keyboard.conf"
+    local main_config="$hypr_config_dir/hyprland.conf"
+
+    if [[ ! -d "$hypr_config_dir" ]]; then
+        log_warn "Hyprland config directory '$hypr_config_dir' not found. Skipping keyboard setup."
+        return
+    fi
+
+    # Detect current keyboard layout
+    local current_layout
+    current_layout=$(localectl status 2>/dev/null | grep "X11 Layout" | awk -F': ' '{print $2}' | xargs || echo "us")
+    current_layout="${current_layout:-us}"
+
+    log_info "Detected keyboard layout: $current_layout"
+    log_info "Writing managed keyboard config to: $managed_file"
+
+    # Write the dedicated include file (safe to overwrite — it's managed by this script)
+    cat > "$managed_file" <<EOF
+# managed by rice installer — do not edit manually
+# re-run the installer to update this file
 input {
-    kb_layout = $CURRENT_LAYOUT
+    kb_layout = $current_layout
 }
 EOF
 
-    echo "[✓] Hyprland keyboard layout set to '$CURRENT_LAYOUT'."
-else
-    echo "[!] Hyprland configuration file not found at '$HYPR_CONFIG'. Skipping keyboard setup."
+    # Add source line to main config if not already there
+    if [[ -f "$main_config" ]]; then
+        if ! grep -qF "source = $managed_file" "$main_config"; then
+            log_info "Adding include line to hyprland.conf..."
+            echo "" >> "$main_config"
+            echo "source = $managed_file" >> "$main_config"
+        else
+            log_info "Include line already present in hyprland.conf."
+        fi
+    else
+        log_warn "hyprland.conf not found at '$main_config'. Include line not added."
+        log_warn "Add manually: source = $managed_file"
+    fi
+
+    log_ok "Hyprland keyboard layout set to '$current_layout'."
+}
+
+# =============================================================================
+#  PHASE: FINALIZE
+# =============================================================================
+do_finalize() {
+    # Create standard user directories
+    log_info "Creating user directories..."
+    mkdir -p "$HOME/Documents" "$HOME/Downloads" "$HOME/Images" "$HOME/Videos" "$HOME/Music"
+    log_ok "User directories created."
+
+    # Safe cleanup: only remove installer temp files and yay build cache
+    log_info "Cleaning up installer temp files..."
+    rm -rf /tmp/yay-build-*
+    yay -Sc --noconfirm 2>/dev/null || true
+    # NOTE: We deliberately do NOT wipe $HOME/.cache — that would destroy
+    # unrelated application state the user may want to keep.
+    log_ok "Cleanup complete (user cache left intact)."
+
+    # SDDM display manager
+    if command -v sddm &>/dev/null; then
+        log_info "Enabling SDDM display manager..."
+        _enable_system_service sddm
+    else
+        log_warn "SDDM not installed — display manager not enabled."
+        log_warn "Add 'sddm' to packages.txt if you want a graphical login screen."
+    fi
+
+    log_ok "Finalization complete."
+}
+
+# =============================================================================
+#  POST-INSTALL VERIFICATION REPORT
+# =============================================================================
+print_report() {
+    echo
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  INSTALLATION REPORT"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    # Phase summary
+    echo
+    echo "  Phases:"
+    for phase in "${PHASES[@]}"; do
+        if phase_is_done "$phase"; then
+            echo -e "    \e[32m[✓]\e[0m $phase"
+        elif [[ " ${SKIPPED_PHASES[*]} " =~ " $phase " ]]; then
+            echo -e "    \e[34m[→]\e[0m $phase (skipped — already done)"
+        else
+            echo -e "    \e[31m[✗]\e[0m $phase (not completed)"
+        fi
+    done
+
+    # Failed packages
+    echo
+    if [[ "${#FAILED_PACKAGES[@]}" -eq 0 ]]; then
+        echo -e "  Packages:   \e[32mAll installed\e[0m"
+    else
+        echo -e "  Packages:   \e[31m${#FAILED_PACKAGES[@]} failed\e[0m"
+        for pkg in "${FAILED_PACKAGES[@]}"; do
+            echo "    - $pkg"
+        done
+        echo
+        echo "  Retry with:"
+        echo "    yay -S --needed ${FAILED_PACKAGES[*]}"
+    fi
+
+    # Failed services
+    echo
+    if [[ "${#FAILED_SERVICES[@]}" -eq 0 ]]; then
+        echo -e "  Services:   \e[32mAll enabled\e[0m"
+    else
+        echo -e "  Services:   \e[33m${#FAILED_SERVICES[@]} issue(s)\e[0m"
+        for svc in "${FAILED_SERVICES[@]}"; do
+            echo "    - $svc"
+        done
+    fi
+
+    echo
+    echo "  Log file:   $LOG_FILE"
+    echo "  State file: $STATE_FILE"
+    if [[ -d "$BACKUP_DIR" ]]; then
+        echo "  Backups:    $BACKUP_DIR"
+    fi
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo
+    log_ok "Installation complete! Please reboot your system."
+
+    read -rp "  Reboot now? [y/N]: " reboot_now
+    if [[ "$reboot_now" =~ ^[Yy]$ ]]; then
+        sudo reboot
+    fi
+}
+
+# =============================================================================
+#  ARGUMENT PARSING
+# =============================================================================
+case "${1:-}" in
+    --check)  MODE="check" ;;
+    --run)    MODE="run" ;;
+    --resume) MODE="resume" ;;
+    "")       MODE="run" ;;
+    *)
+        echo "Usage: $0 [--check | --run | --resume]"
+        echo "  --check   Preflight checks only, no changes"
+        echo "  --run     Full install (default)"
+        echo "  --resume  Resume from last successful phase"
+        exit 1
+        ;;
+esac
+
+# =============================================================================
+#  MAIN
+# =============================================================================
+echo
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  Rice Installer v${SCRIPT_VERSION} — mode: ${MODE^^}"
+echo "  Log: $LOG_FILE"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+if [[ "$MODE" == "resume" ]] && [[ ! -f "$STATE_FILE" ]]; then
+    log_warn "No state file found at $STATE_FILE. Starting fresh."
+    MODE="run"
 fi
 
-### === FINALIZATION ===
-echo "\n[+] Cleaning up..."
-sudo pacman -Sc --noconfirm
-yay -Sc --noconfirm
-rm -rf /tmp/yay
-rm -rf "$USER_HOME/.cache/"* 2>/dev/null || true
-echo "[✓] Cleanup completed"
+# Preflight always runs (it doesn't write state itself in check mode)
+do_preflight
 
-### === DONE ===
-which sddm &>/dev/null
-if command -v sddm &>/dev/null; then
-    echo "\n[+] Enabling SDDM display manager..."
-    sudo systemctl enable sddm
-    echo "[✓] SDDM enabled."
-else
-    echo "[!] SDDM not installed, skipping enabling."
-fi
+# Start sudo keepalive for install/resume modes
+_start_sudo_keepalive
 
-echo "[✓] Installation complete! Please reboot your system."
+phase_run preflight          true   # already done above — mark it
+phase_run base_system        do_base_system
+phase_run aur_helper         do_aur_helper
+phase_run gpu_drivers        do_gpu_drivers
+phase_run zsh                do_zsh
+phase_run services           do_services
+phase_run packages           do_packages
+phase_run dotfiles           do_dotfiles
+phase_run hyprland_keyboard  do_hyprland_keyboard
+phase_run finalize           do_finalize
+
+print_report
