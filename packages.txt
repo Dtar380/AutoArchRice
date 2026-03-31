@@ -5,6 +5,7 @@ hyprland                     # Wayland compositor (main graphical environment)
 xdg-desktop-portal           # portal support for sandboxed apps (Flatpak, etc.)
 xdg-desktop-portal-hyprland  # Hyprland-specific integration for XDG portals
 xdg-desktop-portal-gtk       # GTK environment integration for XDG portals
+xdg-user-dirs                # Tool to properly register User directories
 nwg-look                     # GTK theming tool for Wayland
 gradience                    # GTK4/libadwaita color customizer
 hypridle                     # manages idle behavior, screen locking, and suspend
@@ -46,6 +47,7 @@ lsd                          # modern ls replacement with colors and icons
 bat                          # enhanced cat with syntax highlighting and line numbers
 zoxide                       # smart and fast directory navigation
 ripgrep                      # fast text search in files
+imagemagick                  # Enables image manipulating via terminal
 
 #==============================================================================
 # File explorer
