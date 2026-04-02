@@ -6,11 +6,14 @@ xdg-desktop-portal           # portal support for sandboxed apps (Flatpak, etc.)
 xdg-desktop-portal-hyprland  # Hyprland-specific integration for XDG portals
 xdg-desktop-portal-gtk       # GTK environment integration for XDG portals
 xdg-user-dirs                # Tool to properly register User directories
+xdg-utils                    # Standard desktop utilities
 nwg-look                     # GTK theming tool for Wayland
 gradience                    # GTK4/libadwaita color customizer
 hypridle                     # manages idle behavior, screen locking, and suspend
 hyprlock                     # screen locker
-hyprshot                     # screenshot tool for Wayland
+grim                         # Screenshot utility
+slurp                        # Region selector for screenshots
+hyprshot                     # Screenshot tool from hyprland
 hyprpicker                   # color picker
 swww                         # wallpaper engine
 rofi-wayland                 # launcher used to launch applications with a GUI
@@ -19,11 +22,24 @@ wl-clipboard                 # clipboard utilities for Wayland (terminal copy/pa
 cliphist                     # clipboard history manager (requires wl-clipboard)
 waybar                       # customizable status bar
 eww                          # customizable widgets and desktop panels
+w-logout                     # Graphical logout/power/session menu
+
+#==============================================================================
+# System integration & authentication
+#==============================================================================
+polkit-gnome                 # Authentication agent — lets GUI apps request elevation
 
 #==============================================================================
 # Login/display manager
 #==============================================================================
 sddm                         # display manager (login screen)
+
+#==============================================================================
+# Qt theming
+#==============================================================================
+qt5ct                        # Qt5 theme/font/icon configuration tool
+qt6ct                        # Qt6 theme/font/icon configuration tool
+kvantum                      # SVG-based Qt theme engine (used by qt5ct/qt6ct)
 
 #==============================================================================
 # Fonts
@@ -48,6 +64,9 @@ bat                          # enhanced cat with syntax highlighting and line nu
 zoxide                       # smart and fast directory navigation
 ripgrep                      # fast text search in files
 imagemagick                  # Enables image manipulating via terminal
+libnotify                    # Provides notify-send — used by rice scripts for popups
+socat                        # Socket communication — required for Hyprland IPC scripts
+pamixer                      # PipeWire/PulseAudio volume control from CLI and scripts
 
 #==============================================================================
 # File explorer

@@ -13,7 +13,7 @@ set -euo pipefail
 # =============================================================================
 #  CONSTANTS & GLOBAL STATE
 # =============================================================================
-readonly SCRIPT_VERSION="2.0.0"
+readonly SCRIPT_VERSION="2.1.0"
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly LOG_FILE="$SCRIPT_DIR/install-$(date +%Y%m%d_%H%M%S).log"
 readonly STATE_FILE="$SCRIPT_DIR/.install_state"
@@ -32,6 +32,7 @@ readonly -a PHASES=(
     zsh
     services
     dotfiles
+    rice_setup
     hyprland_keyboard
     finalize
 )
@@ -560,7 +561,7 @@ _sync_dir() {
 }
 
 do_dotfiles() {
-    mkdir -p "$HOME/.config" "$HOME/.local/bin" "$HOME/.local/share"
+    mkdir -p "$HOME/.config" "$HOME/.local/bin"
     mkdir -p "$BACKUP_DIR"
 
     # Home files (flat copy)
@@ -598,6 +599,14 @@ do_dotfiles() {
 }
 
 # =============================================================================
+#  PHASE: RICE SETUP
+# =============================================================================
+
+do_rice_setup() {
+
+}
+
+# =============================================================================
 #  PHASE: HYPRLAND KEYBOARD (managed include file)
 # =============================================================================
 do_hyprland_keyboard() {
@@ -624,6 +633,18 @@ do_hyprland_keyboard() {
 # re-run the installer to update this file
 input {
     kb_layout = $current_layout
+    kb_variant =
+    kb_model =
+    kb_options =
+    kb_rules =
+
+    follow_mouse = 1
+
+    sensitivity = 0 # -1.0 - 1.0, 0 means no modification.
+
+    touchpad {
+        natural_scroll = false
+    }
 }
 EOF
 
@@ -781,6 +802,7 @@ phase_run zsh                do_zsh
 phase_run services           do_services
 phase_run packages           do_packages
 phase_run dotfiles           do_dotfiles
+phase_run rice_setup         do_rice_setup
 phase_run hyprland_keyboard  do_hyprland_keyboard
 phase_run finalize           do_finalize
 
