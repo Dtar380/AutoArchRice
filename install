@@ -21,6 +21,7 @@ readonly BACKUP_DIR="$HOME/.dotfiles_backup/$(date +%Y%m%d_%H%M%S)"
 readonly PACKAGE_LIST="$SCRIPT_DIR/packages.txt"
 readonly MIN_DISK_MB=5120   # 5 GB minimum free space
 readonly SUDO_KEEPALIVE_PID_FILE="/tmp/rice_sudo_keepalive.pid"
+readonly RICE_DIR="$HOME/.local/share/rice"
 
 # Phases — order matters for resume
 readonly -a PHASES=(
@@ -561,7 +562,7 @@ _sync_dir() {
 }
 
 do_dotfiles() {
-    mkdir -p "$HOME/.config" "$HOME/.local/bin"
+    mkdir -p "$HOME/.config" "$HOME/.local/bin" "$HOME/.local/share"
     mkdir -p "$BACKUP_DIR"
 
     # Home files (flat copy)

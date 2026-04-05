@@ -22,7 +22,7 @@ wl-clipboard                 # clipboard utilities for Wayland (terminal copy/pa
 cliphist                     # clipboard history manager (requires wl-clipboard)
 waybar                       # customizable status bar
 eww                          # customizable widgets and desktop panels
-w-logout                     # Graphical logout/power/session menu
+wlogout                      # Graphical logout/power/session menu
 
 #==============================================================================
 # System integration & authentication
