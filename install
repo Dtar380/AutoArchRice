@@ -601,9 +601,69 @@ do_dotfiles() {
 # =============================================================================
 #  PHASE: RICE SETUP
 # =============================================================================
-
 do_rice_setup() {
+    log_info "Setting up rice directory structure..."
 
+    # --- Core directories ---
+    mkdir -p "$RICE_DIR/themes"
+    log_ok "Rice directory ready: $RICE_DIR"
+
+    # --- Copy bundled themes (skip-if-exists) ---
+    local src_themes="$SCRIPT_DIR/dotfiles/rice/themes"
+    if [[ ! -d "$src_themes" ]]; then
+        log_warn "No bundled themes found at '$src_themes'."
+        log_warn "Add themes under dotfiles/rice/themes/<theme_name>/ and re-run."
+    else
+        local any_copied=0
+        for theme_dir in "$src_themes"/*/; do
+            local theme_name
+            theme_name=$(basename "$theme_dir")
+            if [[ -d "$RICE_DIR/themes/$theme_name" ]]; then
+                log_info "  Theme '$theme_name' already exists — skipping."
+            else
+                cp -r "$theme_dir" "$RICE_DIR/themes/$theme_name"
+                log_ok "  Installed theme: $theme_name"
+                any_copied=1
+            fi
+        done
+        [[ "$any_copied" -eq 0 ]] && log_info "All bundled themes already present."
+    fi
+
+    # --- Initialize state file (only on first run) ---
+    local state_file="$RICE_DIR/state"
+    if [[ -f "$state_file" ]]; then
+        local existing_theme
+        existing_theme=$(sed -n '1p' "$state_file")
+        log_info "State file already exists (active theme: '$existing_theme') — skipping."
+    else
+        local first_theme="" first_wallpaper=""
+
+        # Pick first available theme directory
+        for d in "$RICE_DIR/themes"/*/; do
+            [[ -d "$d" ]] && first_theme=$(basename "$d") && break
+        done
+
+        # Pick first wallpaper inside that theme
+        if [[ -n "$first_theme" ]]; then
+            for wp in "$RICE_DIR/themes/$first_theme/wallpapers"/*.{png,jpg,jpeg}; do
+                [[ -f "$wp" ]] && first_wallpaper=$(basename "$wp") && break
+            done
+            printf '%s\n%s\n' "$first_theme" "$first_wallpaper" > "$state_file"
+            log_ok "State initialized — theme: '$first_theme', wallpaper: '${first_wallpaper:-none}'."
+        else
+            # No themes yet — write a placeholder so the file always exists
+            printf 'none\n\n' > "$state_file"
+            log_warn "No themes installed yet. State file written with placeholder."
+            log_warn "Add themes to $RICE_DIR/themes/ then run: rice-theme <name>"
+        fi
+    fi
+
+    # --- Wallpaper symlink slot ---
+    mkdir -p "$HOME/Images"
+    log_ok "~/Images/ wallpaper slot ready."
+
+    log_info "Theme will be applied on first login by rice-theme."
+    log_ok "Rice setup complete."
 }
 
 # =============================================================================
