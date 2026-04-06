@@ -223,7 +223,7 @@ do_preflight() {
     fi
 
     # --- Check: required tools exist ---
-    local required_tools=(git curl rsync lspci localectl pacman)
+    local required_tools=(git lspci localectl pacman)
     for tool in "${required_tools[@]}"; do
         if ! command -v "$tool" &>/dev/null; then
             log_error "Required tool not found: $tool"
