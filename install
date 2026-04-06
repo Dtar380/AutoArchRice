@@ -13,7 +13,7 @@ set -euo pipefail
 # =============================================================================
 #  CONSTANTS & GLOBAL STATE
 # =============================================================================
-readonly SCRIPT_VERSION="2.2.0"
+readonly SCRIPT_VERSION="2.3.0"
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly LOG_FILE="$SCRIPT_DIR/install-$(date +%Y%m%d_%H%M%S).log"
 readonly STATE_FILE="$SCRIPT_DIR/.install_state"
@@ -35,6 +35,7 @@ readonly -a PHASES=(
     dotfiles
     rice_setup
     hyprland_keyboard
+    hyprland_monitors
     finalize
 )
 
@@ -623,6 +624,11 @@ do_dotfiles() {
     fi
     shopt -u nullglob
 
+    # --- Make scripts executable ---
+    log_info "Making scripts executable..."
+    find "$HOME/.local/bin" -maxdepth 1 -type f \( -name "rice-*" -o -name "*.sh" \) -exec chmod +x {} \; 2>/dev/null || true
+    log_ok "Scripts permissions updated."
+
     if [[ -d "$BACKUP_DIR" ]] && [[ -n "$(ls -A "$BACKUP_DIR" 2>/dev/null)" ]]; then
         log_info "Backups of overwritten files saved to: $BACKUP_DIR"
     fi
@@ -808,6 +814,86 @@ EOF
     fi
 
     log_ok "Hyprland keyboard layout set to '$current_layout'."
+}
+
+# =============================================================================
+#  PHASE: HYPRLAND MONITORS (auto-detect and select profile)
+# =============================================================================
+do_hyprland_monitors() {
+    local hypr_config_dir="$HOME/.config/hypr"
+    local monitors_link="$hypr_config_dir/monitors.conf"
+    local monitors_profile_dir="$hypr_config_dir/extra/monitors"
+
+    if [[ ! -d "$monitors_profile_dir" ]]; then
+        log_warn "Monitor profiles directory not found: $monitors_profile_dir"
+        return
+    fi
+
+    # Detect connected monitors using hyprctl
+    local monitor_count
+    if command -v hyprctl &>/dev/null; then
+        # This only works if Hyprland is running, so we use lspci/sysfs as fallback
+        monitor_count=$(hyprctl monitors 2>/dev/null | grep "Monitor" | wc -l || echo "0")
+    fi
+
+    # Fallback: detect via connected GPU outputs
+    if [[ "$monitor_count" -eq 0 ]]; then
+        log_info "Hyprland not running, detecting monitors via sysfs..."
+        # Count connected displays: check /sys/class/drm for connected monitors
+        monitor_count=$(find /sys/class/drm -name "card*-*" -o -name "card*-*-*" 2>/dev/null | \
+                        xargs -I {} sh -c '[[ -d "$1/modes" && -s "$1/modes" ]] && echo "$1"' _ {} | wc -l)
+    fi
+
+    # Sanitize count
+    monitor_count=${monitor_count:-1}
+    [[ "$monitor_count" -lt 1 ]] && monitor_count=1
+
+    log_info "Detected $monitor_count monitor(s)"
+
+    # Select profile based on count
+    local profile=""
+    case "$monitor_count" in
+        1)
+            profile="single"
+            log_info "Single monitor detected."
+            ;;
+        2)
+            profile="dual"
+            log_info "Dual monitor setup detected."
+            ;;
+        3|4)
+            profile="triple"
+            log_info "Triple (or more) monitor setup detected — using triple profile."
+            ;;
+        *)
+            profile="single"
+            log_warn "Unusual monitor count ($monitor_count). Defaulting to single profile."
+            ;;
+    esac
+
+    # Check if user wants to override
+    read -rp "Use '$profile' monitor profile? [Y/n/u(ltrawide)]: " monitor_choice
+    case "$monitor_choice" in
+        u|U) profile="ultrawide" ;;
+        n|N)
+            log_info "Monitor profile selection skipped by user. Defaulting to 'single'."
+            profile="single"
+            ;;
+        *)
+            # Keep auto-detected profile
+            ;;
+    esac
+
+    local profile_src="$monitors_profile_dir/$profile.conf"
+
+    if [[ ! -f "$profile_src" ]]; then
+        log_error "Monitor profile not found: $profile_src"
+        return 1
+    fi
+
+    # Create symlink
+    _create_symlink "$profile_src" "$monitors_link" "monitor profile ($profile)"
+    log_ok "Monitor profile '$profile' selected and linked."
 }
 
 # =============================================================================
@@ -1008,6 +1094,7 @@ phase_run packages           do_packages
 phase_run dotfiles           do_dotfiles
 phase_run rice_setup         do_rice_setup
 phase_run hyprland_keyboard  do_hyprland_keyboard
+phase_run hyprland_monitors  do_hyprland_monitors
 phase_run finalize           do_finalize
 
 print_report
