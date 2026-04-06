@@ -1,0 +1,24 @@
+{
+  "name": "Nord",
+  "description": "A minimalist Arctic color scheme",
+  "author": "Arctic Ice Studio",
+  "version": "1.0.0",
+  "colors": {
+    "polar_night_1": "#2e3440",
+    "polar_night_2": "#3b4252",
+    "polar_night_3": "#434c5e",
+    "polar_night_4": "#4c566a",
+    "snow_storm_1": "#d8dee9",
+    "snow_storm_2": "#e5e9f0",
+    "snow_storm_3": "#eceff4",
+    "frost_1": "#8fbcbb",
+    "frost_2": "#88c0d0",
+    "frost_3": "#81a1c1",
+    "frost_4": "#5e81ac",
+    "aurora_1": "#bf616a",
+    "aurora_2": "#d08770",
+    "aurora_3": "#ebcb8b",
+    "aurora_4": "#a3be8c",
+    "aurora_5": "#b48ead"
+  }
+}
