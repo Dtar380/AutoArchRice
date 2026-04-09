@@ -13,7 +13,7 @@ set -euo pipefail
 # =============================================================================
 #  CONSTANTS & GLOBAL STATE
 # =============================================================================
-readonly SCRIPT_VERSION="2.3.2"
+readonly SCRIPT_VERSION="2.3.3"
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly LOG_FILE="$SCRIPT_DIR/install-$(date +%Y%m%d_%H%M%S).log"
 readonly STATE_FILE="$SCRIPT_DIR/.install_state"
@@ -162,9 +162,6 @@ _start_sudo_keepalive() {
         sudo chmod 440 "$sudoers_drop"
         log_ok "Temporary NOPASSWD granted (removed on exit)."
     fi
-
-    # Re-auth
-    sudo -v
 
     # 5. Exit the loop if the parent process ($$) dies
     (
