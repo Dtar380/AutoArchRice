@@ -154,14 +154,13 @@ _start_sudo_keepalive() {
         kill "$old_pid" 2>/dev/null
     fi
 
-    # 4. Configure global timestamp so keepalive works across all subshells/TTYs
+    # 4. Grant passwordless sudo for the duration of the install
     local sudoers_drop="/etc/sudoers.d/rice-installer"
     if [[ ! -f "$sudoers_drop" ]]; then
-        log_info "Configuring sudo timestamp scope..."
-        echo "Defaults timestamp_type=global,timestamp_timeout=120" | \
-            sudo tee "$sudoers_drop" > /dev/null
+        log_info "Granting temporary passwordless sudo for install..."
+        echo "$USER ALL=(ALL) NOPASSWD: ALL" | sudo tee "$sudoers_drop" > /dev/null
         sudo chmod 440 "$sudoers_drop"
-        log_ok "Sudo timestamp set to global."
+        log_ok "Temporary NOPASSWD granted (removed on exit)."
     fi
 
     # Re-auth
