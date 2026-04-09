@@ -96,6 +96,12 @@ _cleanup() {
         fi
         rm -f "$SUDO_KEEPALIVE_PID_FILE"
     fi
+
+    # Remove installer sudoers override
+    if [[ -f /etc/sudoers.d/rice-installer ]]; then
+        sudo rm -f /etc/sudoers.d/rice-installer
+        log_ok "Removed installer sudoers override."
+    fi
 }
 
 trap '_on_error $LINENO "$BASH_COMMAND"' ERR
@@ -148,7 +154,17 @@ _start_sudo_keepalive() {
         kill "$old_pid" 2>/dev/null
     fi
 
-    # 4. Exit the loop if the parent process ($$) dies
+    # 4. Configure global timestamp so keepalive works across all subshells/TTYs
+    local sudoers_drop="/etc/sudoers.d/rice-installer"
+    if [[ ! -f "$sudoers_drop" ]]; then
+        log_info "Configuring sudo timestamp scope..."
+        echo "Defaults timestamp_type=global,timestamp_timeout=120" | \
+            sudo tee "$sudoers_drop" > /dev/null
+        sudo chmod 440 "$sudoers_drop"
+        log_ok "Sudo timestamp set to global."
+    fi
+
+    # 5. Exit the loop if the parent process ($$) dies
     (
         while kill -0 "$$" 2>/dev/null; do
             sleep 50                              # Sleep FIRST, shorter than 60s
