@@ -154,6 +154,9 @@ _start_sudo_keepalive() {
         kill "$old_pid" 2>/dev/null
     fi
 
+    # Re-auth
+    sudo -v
+
     # 4. Configure global timestamp so keepalive works across all subshells/TTYs
     local sudoers_drop="/etc/sudoers.d/rice-installer"
     if [[ ! -f "$sudoers_drop" ]]; then
