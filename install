@@ -151,8 +151,8 @@ _start_sudo_keepalive() {
     # 4. Exit the loop if the parent process ($$) dies
     (
         while kill -0 "$$" 2>/dev/null; do
-            sudo -n true
-            sleep 60
+            sleep 50                              # Sleep FIRST, shorter than 60s
+            sudo -n true </dev/null 2>/dev/null  # Redirect stdin/stderr to prevent prompts
         done
     ) &
     echo $! > "$SUDO_KEEPALIVE_PID_FILE"
