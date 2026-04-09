@@ -13,7 +13,7 @@ set -euo pipefail
 # =============================================================================
 #  CONSTANTS & GLOBAL STATE
 # =============================================================================
-readonly SCRIPT_VERSION="2.3.0"
+readonly SCRIPT_VERSION="2.3.1"
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly LOG_FILE="$SCRIPT_DIR/install-$(date +%Y%m%d_%H%M%S).log"
 readonly STATE_FILE="$SCRIPT_DIR/.install_state"
@@ -839,9 +839,24 @@ do_hyprland_monitors() {
     # Fallback: detect via connected GPU outputs
     if [[ "$monitor_count" -eq 0 ]]; then
         log_info "Hyprland not running, detecting monitors via sysfs..."
-        # Count connected displays: check /sys/class/drm for connected monitors
-        monitor_count=$(find /sys/class/drm -name "card*-*" -o -name "card*-*-*" 2>/dev/null | \
-                        xargs -I {} sh -c '[[ -d "$1/modes" && -s "$1/modes" ]] && echo "$1"' _ {} | wc -l)
+        # Try multiple detection methods for VMs and bare metal
+        # Method 1: xrandr if available
+        if command -v xrandr &>/dev/null; then
+            monitor_count=$(xrandr --query 2>/dev/null | grep " connected" | wc -l)
+        fi
+        # Method 2: Fall back to sysfs if xrandr didn't work
+        if [[ "$monitor_count" -eq 0 ]]; then
+            monitor_count=$(find /sys/class/drm -name "*-1" 2>/dev/null | grep -E "(HDMI|DP|eDP)" | wc -l)
+        fi
+        # Method 3: Check /proc/cmdline for QEMU/VBox hints
+        if [[ "$monitor_count" -eq 0 ]]; then
+            if grep -q "QEMU\|VirtualBox" /proc/cpuinfo 2>/dev/null; then
+                log_info "Virtual machine detected, defaulting to single monitor"
+                monitor_count=1
+            else
+                monitor_count=1
+            fi
+        fi
     fi
 
     # Sanitize count
@@ -974,7 +989,17 @@ do_finalize() {
     # SDDM display manager
     if command -v sddm &>/dev/null; then
         log_info "Enabling SDDM display manager..."
-        _enable_system_service sddm
+        # Try both possible unit names
+        if _unit_exists "sddm.service" 2>/dev/null || _unit_exists "sddm" 2>/dev/null; then
+            _enable_system_service sddm.service 2>/dev/null || _enable_system_service sddm 2>/dev/null || true
+            if sudo systemctl is-enabled sddm &>/dev/null || sudo systemctl is-enabled sddm.service &>/dev/null; then
+                log_ok "SDDM enabled successfully."
+            else
+                log_warn "SDDM may not be properly enabled. Try: sudo systemctl enable sddm"
+            fi
+        else
+            log_warn "SDDM service unit not found."
+        fi
     else
         log_warn "SDDM not installed — display manager not enabled."
         log_warn "Add 'sddm' to packages.txt if you want a graphical login screen."
