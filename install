@@ -13,7 +13,7 @@ set -euo pipefail
 # =============================================================================
 #  CONSTANTS & GLOBAL STATE
 # =============================================================================
-readonly SCRIPT_VERSION="2.3.1"
+readonly SCRIPT_VERSION="2.3.2"
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly LOG_FILE="$SCRIPT_DIR/install-$(date +%Y%m%d_%H%M%S).log"
 readonly STATE_FILE="$SCRIPT_DIR/.install_state"
@@ -129,11 +129,30 @@ phase_run() {
 #  SUDO KEEPALIVE
 # =============================================================================
 _start_sudo_keepalive() {
-    sudo -v
+    # 1. Bail early if PID file path is not set
+    if [[ -z "$SUDO_KEEPALIVE_PID_FILE" ]]; then
+        log_error "SUDO_KEEPALIVE_PID_FILE is not set."
+        return 1
+    fi
+
+    # 2. Fail fast if sudo auth fails
+    if ! sudo -v; then
+        log_error "Failed to obtain sudo credentials."
+        return 1
+    fi
+
+    # 3. Kill orphaned keepalive from a previous run, if any
+    if [[ -f "$SUDO_KEEPALIVE_PID_FILE" ]]; then
+        local old_pid
+        old_pid=$(cat "$SUDO_KEEPALIVE_PID_FILE")
+        kill "$old_pid" 2>/dev/null
+    fi
+
+    # 4. Exit the loop if the parent process ($$) dies
     (
-        while true; do
-            sudo -v
-            sleep 55
+        while kill -0 "$$" 2>/dev/null; do
+            sudo -n true
+            sleep 60
         done
     ) &
     echo $! > "$SUDO_KEEPALIVE_PID_FILE"
